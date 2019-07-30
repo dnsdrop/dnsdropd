@@ -1,0 +1,34 @@
+{
+  "_rcode": 0,
+  "_opcode": 0,
+  "_additional": [],
+  "_authority": [],
+  "_answer": [],
+  "_question": [
+    {
+      "_rr_question": true,
+      "_rdata_fields": [],
+      "_rr_class": 1,
+      "_rr_type": 1,
+      "_rd_count": 0,
+      "_ttl": 3600,
+      "_owner": {
+        "_data": "ackers.net.",
+        "_type": 1
+      }
+    }
+  ],
+  "_arcount": 0,
+  "_nscount": 0,
+  "_ancount": 0,
+  "_qdcount": 1,
+  "_id": 2819,
+  "_ad": true,
+  "_ra": false,
+  "_cd": false,
+  "_rd": true,
+  "_tc": false,
+  "_aa": false,
+  "_qr": false
+}
+

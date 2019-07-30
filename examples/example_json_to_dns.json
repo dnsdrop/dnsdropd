@@ -1,0 +1,89 @@
+{
+  "_rcode": 0,
+  "_opcode": 0,
+  "_answerfrom": {
+    "_data": "127.0.0.53",
+    "_type": 5
+  },
+  "_additional": [],
+  "_authority": [],
+  "_answer": [
+    {
+      "_rr_question": false,
+      "_rdata_fields": [
+        {
+          "_data": "dnsdrop.com.",
+          "_type": 1
+        }
+      ],
+      "_rr_class": "IN",
+      "_rr_type": "CNAME",
+      "_rd_count": 1,
+      "_ttl": 86400,
+      "_owner": {
+        "_data": "www.dnsdrop.com.",
+        "_type": 1
+      }
+    },
+    {
+      "_rr_question": false,
+      "_rdata_fields": [
+        {
+          "_data": "8.8.8.5",
+          "_type": 5
+        }
+      ],
+      "_rr_class": "IN",
+      "_rr_type": "A",
+      "_rd_count": 1,
+      "_ttl": 7199,
+      "_owner": {
+        "_data": "dnsdrop.com.",
+        "_type": 1
+      }
+    },
+    {
+      "_rr_question": false,
+      "_rdata_fields": [
+        {
+          "_data": "5.5.5.5",
+          "_type": 5
+        }
+      ],
+      "_rr_class": "IN",
+      "_rr_type": "A",
+      "_rd_count": 1,
+      "_ttl": 7199,
+      "_owner": {
+        "_data": "dnsdrop.com.",
+        "_type": 1
+      }
+    }
+  ],
+  "_question": [
+    {
+      "_rr_question": true,
+      "_rdata_fields": [],
+      "_rr_class": "IN",
+      "_rr_type": "A",
+      "_rd_count": 0,
+      "_ttl": 3600,
+      "_owner": {
+        "_data": "www.dnsdrop.com.",
+        "_type": 1
+      }
+    }
+  ],
+  "_arcount": 0,
+  "_nscount": 0,
+  "_ancount": 3,
+  "_qdcount": 1,
+  "_id": 61489,
+  "_ad": false,
+  "_ra": true,
+  "_cd": false,
+  "_rd": true,
+  "_tc": false,
+  "_aa": false,
+  "_qr": true
+}
