@@ -263,6 +263,9 @@ resolver_callback_(struct ddrop_resolver_request * req, void * args)
         outlen      = lz_json_to_buffer(answer_json,
             outbuf, sizeof(outbuf));
 
+        fprintf(stdout, "%.*s\n", (int)outlen, outbuf);
+        fflush(stdout);
+
         do {
             const char * encoding = evhtp_header_find(request->headers_in, "accept-encoding");
 
@@ -313,7 +316,7 @@ resolver_callback_(struct ddrop_resolver_request * req, void * args)
 
 
         evhtp_headers_add_header(request->headers_out,
-                evhtp_header_new("Content-Type",  "application/dnsdrop-json", 0, 0));
+                evhtp_header_new("Content-Type", "application/dnsdrop-json", 0, 0));
         evbuffer_add(request->buffer_out, outbuf, outlen);
 
         ddrop_safe_free(answer_json, lz_json_free);
@@ -350,7 +353,6 @@ http_request_handler_(evhtp_request_t * request, void * arg)
     }
 
     if (!(query_json = lz_json_parse_buf((const char *)buffer, buffer_len, &n_read))) {
-        printf("FUCK %s\n", buffer);
         return evhtp_send_reply(request, EVHTP_RES_SERVERR);
     }
 

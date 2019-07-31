@@ -20,7 +20,7 @@ ExternalProject_Add(${libevhtp_NAME}
             -DCMAKE_EXE_LINKER_FLAGS=-L${BUILDEM_LIB_DIR}
             -DCMAKE_INSTALL_PREFIX:PATH=${BUILDEM_DIR}
             -DCMAKE_BUILD_TYPE:PATH=${CMAKE_BUILD_TYPE}
-            -DEVHTP_DEBUG=ON
+            -DEVHTP_DEBUG=OFF
 )
 
 endif()
