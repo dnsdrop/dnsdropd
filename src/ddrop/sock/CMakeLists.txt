@@ -1,1 +1,1 @@
-add_library(ddrop_socket socket.c)
+add_library(ddrop_socket STATIC socket.c)

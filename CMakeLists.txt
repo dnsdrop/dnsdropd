@@ -15,6 +15,7 @@ include              (${PROJECT_BINARY_DIR}/thirdparty.cmake)
 check_include_files  (sys/tree.h  HAVE_SYS_TREE)
 check_include_files  (sys/queue.h HAVE_SYS_QUEUE)
 
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS}")
 if (NOT HAVE_SYS_TREE)
     configure_file(
         ${CMAKE_CURRENT_SOURCE_DIR}/compat/sys/tree.h.in
@@ -27,6 +28,7 @@ if (NOT HAVE_SYS_QUEUE)
         ${PROJECT_BINARY_DIR}/include/sys/queue.h)
 endif()
 
+
 include_directories  (${OPENSSL_INCLUDE_DIRS})
 include_directories  (${PROJECT_BINARY_DIR}/include)
 include_directories  (${CMAKE_SOURCE_DIR}/src)
@@ -34,3 +36,4 @@ link_directories     (${PROJECT_BINARY_DIR}/lib)
 
 add_subdirectory(src)
 add_subdirectory(examples)
+

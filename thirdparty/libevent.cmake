@@ -21,7 +21,8 @@ ExternalProject_Add(${libevent_NAME}
             --disable-libevent-regress
             --disable-debug-mode
             --disable-samples
-            --enable-shared
+            --disable-shared
+            --enable-static
 
        BUILD_COMMAND     ${BUILDEM_ENV_STRING} make
        INSTALL_COMMAND   ${BUILDEM_ENV_STRING} make install

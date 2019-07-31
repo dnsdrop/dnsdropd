@@ -10,7 +10,6 @@ list (APPEND CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/thirdparty")
 
 include(libevent)
 include(libevhtp)
-include(libldns)
 include(liblz_core)
 include(liblz_json)
 
