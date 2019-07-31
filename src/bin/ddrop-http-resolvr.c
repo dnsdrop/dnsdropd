@@ -28,7 +28,8 @@ enum {
     OPTARG_VERIFY_DEPTH,
     OPTARG_RESOLV_CONF,
     OPTARG_BIND_ADDR,
-    OPTARG_BIND_PORT
+    OPTARG_BIND_PORT,
+    OPTARG_USE_HTTP,
 };
 
 struct http_resolvr_cfg {
@@ -40,6 +41,7 @@ struct http_resolvr_cfg {
     char   * _listen_addr;
     uint16_t _listen_port;
     char   * _resolv_conf;
+    int      _use_http;
 };
 
 
@@ -54,7 +56,6 @@ static const char * help =
     "        2. intermediate certificate\n\n"
     "      A  secret key in the PEM format may be placed in the\n"
     "      same file.\n\n"
-
     "  -ssl-cert-key <file>\n"
     "      Specifies  a  `file`  with the secret key in the PEM\n"
     "      format\n\n"
@@ -77,7 +78,8 @@ static const char * help =
     "      Port to listen on (ignored if type is `unix:`     \n\n"
 
     "  -resolv-conf <file>                                     \n"
-    "      Alternative resolv.conf (default /etc/resolv.conf)\n\n";
+    "      Alternative resolv.conf (default /etc/resolv.conf)\n\n"
+    "  -use-http                                             \n\n";
 
 
 static int
@@ -90,38 +92,40 @@ validate_config_(struct http_resolvr_cfg * cfg, const char ** errstr)
         return -1;
     }
 
-    if (!cfg->_pub_crt && !cfg->_prv_key) {
-        *errstr = "cert and key are null";
-        return -1;
-    }
+    if (cfg->_use_http == 0) {
+        if (!cfg->_pub_crt && !cfg->_prv_key) {
+            *errstr = "cert and key are null";
+            return -1;
+        }
 
-    if (cfg->_verify_client == -1) {
-        *errstr = "invalid ssl-verify-client value";
-        return -1;
-    }
+        if (cfg->_verify_client == -1) {
+            *errstr = "invalid ssl-verify-client value";
+            return -1;
+        }
 
-    if (cfg->_verify_client && !cfg->_verify_depth) {
-        *errstr = "ssl-verify-depth must be > 0";
-        return -1;
-    }
+        if (cfg->_verify_client && !cfg->_verify_depth) {
+            *errstr = "ssl-verify-depth must be > 0";
+            return -1;
+        }
 
-    if (cfg->_pub_crt && stat(cfg->_pub_crt, &estat) == -1) {
-        *errstr = "_pub_crt";
-        return -1;
-    }
+        if (cfg->_pub_crt && stat(cfg->_pub_crt, &estat) == -1) {
+            *errstr = "_pub_crt";
+            return -1;
+        }
 
-    if (cfg->_prv_key && stat(cfg->_prv_key, &estat) == -1) {
-        *errstr = "_prv_key";
-        return -1;
-    }
+        if (cfg->_prv_key && stat(cfg->_prv_key, &estat) == -1) {
+            *errstr = "_prv_key";
+            return -1;
+        }
 
-    if (cfg->_ca_file && stat(cfg->_ca_file, &estat) == -1) {
-        *errstr = "_ca_file";
-        return -1;
+        if (cfg->_ca_file && stat(cfg->_ca_file, &estat) == -1) {
+            *errstr = "_ca_file";
+            return -1;
+        }
     }
 
     return 0;
-}
+} /* validate_config_ */
 
 static evhtp_ssl_cfg_t *
 resolver_cfg2ssl_cfg_(struct http_resolvr_cfg * r_cfg)
@@ -150,28 +154,20 @@ parse_arguments_(int argc, char ** argv)
     int                       long_index     = 0;
     int                       opt            = 0;
     const char              * errstr         = NULL;
+    int                       use_http       = 0;
 
     static struct option      long_options[] = {
-        { "ssl-cert",                required_argument, 0,
-          OPTARG_CERT },
-        { "ssl-cert-key",            required_argument, 0,
-          OPTARG_KEY },
-        { "ssl-trusted-certificate", required_argument, 0,
-          OPTARG_CA },
-        { "ssl-verify-client",       required_argument, 0,
-          OPTARG_VERIFY_PEER },
-        { "ssl-verify-depth",        required_argument, 0,
-          OPTARG_VERIFY_DEPTH },
-        { "listen-addr",             required_argument, 0,
-          OPTARG_BIND_ADDR },
-        { "listen-port",             required_argument, 0,
-          OPTARG_BIND_PORT },
-        { "resolv-conf",             required_argument, 0,
-          OPTARG_RESOLV_CONF },
-        { "help",                    no_argument,       0,
-          'h' },
-        { NULL,                      0,                 0,
-          0 },
+        { "ssl-cert",                required_argument, 0, OPTARG_CERT         },
+        { "ssl-cert-key",            required_argument, 0, OPTARG_KEY          },
+        { "ssl-trusted-certificate", required_argument, 0, OPTARG_CA           },
+        { "ssl-verify-client",       required_argument, 0, OPTARG_VERIFY_PEER  },
+        { "ssl-verify-depth",        required_argument, 0, OPTARG_VERIFY_DEPTH },
+        { "listen-addr",             required_argument, 0, OPTARG_BIND_ADDR    },
+        { "listen-port",             required_argument, 0, OPTARG_BIND_PORT    },
+        { "resolv-conf",             required_argument, 0, OPTARG_RESOLV_CONF  },
+        { "use-http",                no_argument,       0, OPTARG_USE_HTTP     },
+        { "help",                    no_argument,       0, 'h'                 },
+        { NULL,                      0,                 0, 0                   },
     };
 
     while ((opt = getopt_long_only(argc, argv, "", long_options, &long_index)) != -1) {
@@ -200,10 +196,13 @@ parse_arguments_(int argc, char ** argv)
             case OPTARG_BIND_PORT:
                 bind_port     = atoi(optarg);
                 break;
+            case OPTARG_USE_HTTP:
+                use_http      = 1;
+                break;
             case 'h':
             default:
                 fprintf(stdout, "Usage: %s [opts]\n%s", argv[0], help);
-                return NULL;
+                exit(EXIT_SUCCESS);
         } /* switch */
     }
 
@@ -215,7 +214,8 @@ parse_arguments_(int argc, char ** argv)
         ._verify_depth  = verify_depth ? : 1,
         ._listen_addr   = bind_addr ? : strdup("127.0.0.1"),
         ._listen_port   = bind_port ? : 44353,
-        ._resolv_conf   = resolv_conf
+        ._resolv_conf   = resolv_conf,
+        ._use_http      = use_http,
     });
 
     if (validate_config_(config, &errstr) == -1) {
@@ -312,6 +312,8 @@ resolver_callback_(struct ddrop_resolver_request * req, void * args)
         } while (0);
 
 
+        evhtp_headers_add_header(request->headers_out,
+                evhtp_header_new("Content-Type",  "application/dnsdrop-json", 0, 0));
         evbuffer_add(request->buffer_out, outbuf, outlen);
 
         ddrop_safe_free(answer_json, lz_json_free);
@@ -331,11 +333,11 @@ static void
 http_request_handler_(evhtp_request_t * request, void * arg)
 {
     struct ddrop_resolver_ctx * resolver_ctx;
-    size_t                   buffer_len;
-    unsigned char          * buffer;
-    size_t                   n_read;
-    ldns_pkt               * query_pkt;
-    lz_json                * query_json;
+    size_t                      buffer_len;
+    unsigned char             * buffer;
+    size_t                      n_read;
+    ldns_pkt                  * query_pkt;
+    lz_json                   * query_json;
 
     resolver_ctx = (struct ddrop_resolver_ctx *)arg;
     ddrop_assert(resolver_ctx != NULL);
@@ -343,14 +345,12 @@ http_request_handler_(evhtp_request_t * request, void * arg)
     buffer_len   = evbuffer_get_length(request->buffer_in);
     buffer       = evbuffer_pullup(request->buffer_in, buffer_len);
 
-    printf("%zu\n", buffer_len);
-
     if (buffer_len == 0) {
-        printf("FUCK FUCK FUCK\n");
         return evhtp_send_reply(request, 500);
     }
 
     if (!(query_json = lz_json_parse_buf((const char *)buffer, buffer_len, &n_read))) {
+        printf("FUCK %s\n", buffer);
         return evhtp_send_reply(request, EVHTP_RES_SERVERR);
     }
 
@@ -370,17 +370,17 @@ http_request_handler_(evhtp_request_t * request, void * arg)
 
     ddrop_safe_free(query_json, lz_json_free);
     return evhtp_request_pause(request);
-}
+} /* http_request_handler_ */
 
 int
 main(int argc, char ** argv)
 {
-    struct http_resolvr_cfg * config;
-    struct event_base       * evbase;
-    struct ddrop_resolver_ctx  * resolver;
-    evhtp_ssl_cfg_t         * ssl_config;
-    evhtp_t                 * htp;
-    int                       res;
+    struct http_resolvr_cfg   * config;
+    struct event_base         * evbase;
+    struct ddrop_resolver_ctx * resolver;
+    evhtp_ssl_cfg_t           * ssl_config;
+    evhtp_t                   * htp;
+    int                         res;
 
     config     = parse_arguments_(argc, argv);
     ddrop_assert(config != NULL);
@@ -408,8 +408,10 @@ main(int argc, char ** argv)
 
     htp->flags = EVHTP_FLAG_ENABLE_ALL;
 
-    res        = evhtp_ssl_init(htp, ssl_config);
-    ddrop_assert(res != -1);
+    if (config->_use_http == 0) {
+        res = evhtp_ssl_init(htp, ssl_config);
+        ddrop_assert(res != -1);
+    }
 
     evhtp_set_cb(htp, "/_dns/",
         http_request_handler_, resolver);
