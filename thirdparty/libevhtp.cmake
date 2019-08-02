@@ -5,7 +5,7 @@ include (BuildSupport)
 if (NOT libevhtp_NAME)
 
 external_git_repo (libevhtp
-    HEAD
+    develop
     https://www.github.com/criticalstack/libevhtp)
 
 ExternalProject_Add(${libevhtp_NAME}

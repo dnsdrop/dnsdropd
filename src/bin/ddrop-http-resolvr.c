@@ -30,6 +30,7 @@ enum {
     OPTARG_BIND_ADDR,
     OPTARG_BIND_PORT,
     OPTARG_USE_HTTP,
+    OPTARG_CONN_CLOSE,
 };
 
 struct http_resolvr_cfg {
@@ -42,8 +43,8 @@ struct http_resolvr_cfg {
     uint16_t _listen_port;
     char   * _resolv_conf;
     int      _use_http;
+    int      _conn_closed;
 };
-
 
 static const char * help =
     "  -ssl-cert <file>\n"
@@ -155,6 +156,7 @@ parse_arguments_(int argc, char ** argv)
     int                       opt            = 0;
     const char              * errstr         = NULL;
     int                       use_http       = 0;
+    int                       conn_closed    = 0;
 
     static struct option      long_options[] = {
         { "ssl-cert",                required_argument, 0, OPTARG_CERT         },
@@ -166,6 +168,7 @@ parse_arguments_(int argc, char ** argv)
         { "listen-port",             required_argument, 0, OPTARG_BIND_PORT    },
         { "resolv-conf",             required_argument, 0, OPTARG_RESOLV_CONF  },
         { "use-http",                no_argument,       0, OPTARG_USE_HTTP     },
+        { "conn-close",              no_argument,       0, OPTARG_CONN_CLOSE   },
         { "help",                    no_argument,       0, 'h'                 },
         { NULL,                      0,                 0, 0                   },
     };
@@ -196,6 +199,9 @@ parse_arguments_(int argc, char ** argv)
             case OPTARG_BIND_PORT:
                 bind_port     = atoi(optarg);
                 break;
+            case OPTARG_CONN_CLOSE:
+                conn_closed   = 1;
+                break;
             case OPTARG_USE_HTTP:
                 use_http      = 1;
                 break;
@@ -216,6 +222,7 @@ parse_arguments_(int argc, char ** argv)
         ._listen_port   = bind_port ? : 44353,
         ._resolv_conf   = resolv_conf,
         ._use_http      = use_http,
+        ._conn_closed   = conn_closed,
     });
 
     if (validate_config_(config, &errstr) == -1) {
@@ -254,7 +261,7 @@ resolver_callback_(struct ddrop_resolver_request * req, void * args)
         res = EVHTP_RES_PRECONDFAIL;
     } else {
         lz_json * answer_json;
-        char      outbuf[4096] = { 0 };
+        char      outbuf[65535] = { 0 };
         size_t    outlen;
 
         answer_json = ddrop_dns_to_json(answer_pkt);
@@ -314,6 +321,11 @@ resolver_callback_(struct ddrop_resolver_request * req, void * args)
                 evhtp_header_new("Content-Encoding", "gzip", 0, 0));
         } while (0);
 
+
+        /*
+        evhtp_headers_add_header(request->headers_out,
+                evhtp_header_new("Connection", "close", 0, 0));
+                */
 
         evhtp_headers_add_header(request->headers_out,
                 evhtp_header_new("Content-Type", "application/dnsdrop-json", 0, 0));

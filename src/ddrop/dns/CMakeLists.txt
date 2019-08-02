@@ -3,6 +3,7 @@ add_library(ddrop_dnsSHIM     STATIC shim.c)
 add_library(ddrop_dnsD        STATIC dnsd.c)
 add_library(ddrop_dnsResolver STATIC resolver.c)
 add_library(ddrop_dnsSniff    STATIC sniff.c)
+add_library(ddrop_dnsRBL      STATIC rbl.c)
 
-add_library(ddrop_dns STATIC json.c dnsd.c resolver.c sniff.c)
+add_library(ddrop_dns STATIC json.c dnsd.c resolver.c sniff.c rbl.c)
 target_link_libraries(ddrop_dns PRIVATE pcap ldns event)
