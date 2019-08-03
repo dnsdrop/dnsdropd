@@ -25,18 +25,18 @@ struct ddrop_resolver_ctx {
 
 struct ddrop_resolver_request {
     struct ddrop_resolver_ctx * _ctx;
-    struct event           * _event;
-    ldns_pkt               * _q_packet;
-    ldns_pkt               * _a_packet;
-    ldns_status              _status;
+    struct event              * _event;
+    ldns_pkt                  * _q_packet;
+    ldns_pkt                  * _a_packet;
+    ldns_status                 _status;
     ddrop_resolver_cb           _callback;
-    void                   * _args;
+    void                      * _args;
 };
 
-#define RES_REQ_FNGEN(TYPE, NAME)                                          \
+#define RES_REQ_FNGEN(TYPE, NAME)                                                \
     TYPE ddrop_resolver_request_get ## NAME(struct ddrop_resolver_request * r) { \
-        assert(r);                                                         \
-        return r->NAME;                                                    \
+        assert(r);                                                               \
+        return r->NAME;                                                          \
     }
 
 RES_REQ_FNGEN(ldns_pkt *, _q_packet);
@@ -46,7 +46,8 @@ RES_REQ_FNGEN(ldns_status, _status);
 #define CS__RES_DEFAULT_NTHREADS sysconf(_SC_NPROCESSORS_ONLN)
 
 static void
-resolver__thread_exit_(struct evthr * thread, void * args) {
+resolver__thread_exit_(struct evthr * thread, void * args)
+{
     ldns_resolver * resolver;
 
     /* our thread-specific copy of the ldns_resolver data is set
@@ -63,9 +64,10 @@ resolver__thread_exit_(struct evthr * thread, void * args) {
 }
 
 static void
-resolver__thread_init_(struct evthr * thread, void * args) {
+resolver__thread_init_(struct evthr * thread, void * args)
+{
     struct ddrop_resolver_ctx * ctx;
-    ldns_resolver          * resolver_copy;
+    ldns_resolver             * resolver_copy;
 
     /* since the ldns_resolver held in ddrop_resolver_ctx is not
      * thread-safe, we must make a local copy to each of our
@@ -96,7 +98,8 @@ resolver__thread_init_(struct evthr * thread, void * args) {
 }
 
 struct ddrop_resolver_ctx *
-ddrop_resolver_ctx_new(struct event_base * evbase, const char * resolv_conf) {
+ddrop_resolver_ctx_new(struct event_base * evbase, const char * resolv_conf)
+{
     struct ddrop_resolver_ctx * ctx;
 
     if (evbase == NULL) {
@@ -134,7 +137,8 @@ ddrop_resolver_ctx_new(struct event_base * evbase, const char * resolv_conf) {
 }
 
 void
-ddrop_resolver_ctx_free(struct ddrop_resolver_ctx * ctx) {
+ddrop_resolver_ctx_free(struct ddrop_resolver_ctx * ctx)
+{
     if (ctx == NULL) {
         return;
     }
@@ -151,7 +155,8 @@ ddrop_resolver_ctx_free(struct ddrop_resolver_ctx * ctx) {
 }
 
 int
-ddrop_resolver_ctx_start(struct ddrop_resolver_ctx * ctx) {
+ddrop_resolver_ctx_start(struct ddrop_resolver_ctx * ctx)
+{
     if (ctx == NULL) {
         return -1;
     }
@@ -162,7 +167,8 @@ ddrop_resolver_ctx_start(struct ddrop_resolver_ctx * ctx) {
 }
 
 static void
-request__finalize_(int sock, short events, void * arg) {
+request__finalize_(int sock, short events, void * arg)
+{
     if (events & EV_READ) {
         /* this was called via event_active(..., EV_READ),
          * meaning the calling thread has marked this request
@@ -182,9 +188,10 @@ request__finalize_(int sock, short events, void * arg) {
 }
 
 struct ddrop_resolver_request *
-ddrop_resolver_request_new(struct ddrop_resolver_ctx * ctx) {
+ddrop_resolver_request_new(struct ddrop_resolver_ctx * ctx)
+{
     struct ddrop_resolver_request * req;
-    short                        flags = EV_TIMEOUT | EV_READ;
+    short                           flags = EV_TIMEOUT | EV_READ;
 
     if (ctx == NULL) {
         return NULL;
@@ -223,7 +230,8 @@ ddrop_resolver_request_new(struct ddrop_resolver_ctx * ctx) {
 }
 
 void
-ddrop_resolver_request_free(struct ddrop_resolver_request * req) {
+ddrop_resolver_request_free(struct ddrop_resolver_request * req)
+{
     if (req == NULL) {
         return;
     }
@@ -239,19 +247,20 @@ ddrop_resolver_request_free(struct ddrop_resolver_request * req) {
 }
 
 static void
-resolve__in_thread_(struct evthr * thread, void * arg, void * un__) {
+resolve__in_thread_(struct evthr * thread, void * arg, void * un__)
+{
     struct ddrop_resolver_request * request;
-    ldns_resolver              * resolver;
-    ldns_status                  status;
+    ldns_resolver                 * resolver;
+    ldns_status                     status;
 
-    request          = (struct ddrop_resolver_request *)arg;
+    request = (struct ddrop_resolver_request *)arg;
     assert(request != NULL);
 
     /* as seen in `resolver__thread_init_` function, each thread
      * in our pool is allocated its own copy of the resolver
      * context and placed into the auxillary arguments.
      */
-    resolver         = (ldns_resolver *)evthr_get_aux(thread);
+    resolver = (ldns_resolver *)evthr_get_aux(thread);
     assert(resolver != NULL);
 
     /* use ldns's non-blocking send_pkt to make the request from
@@ -271,8 +280,9 @@ resolve__in_thread_(struct evthr * thread, void * arg, void * un__) {
 
 int
 ddrop_resolver_send_pkt(struct ddrop_resolver_ctx * ctx,
-                     ldns_pkt * packet,
-                     ddrop_resolver_cb cb, void * args) {
+                        ldns_pkt * packet,
+                        ddrop_resolver_cb cb, void * args)
+{
     struct ddrop_resolver_request * request;
 
     if (ctx == NULL) {
@@ -322,10 +332,11 @@ ddrop_resolver_send_pkt(struct ddrop_resolver_ctx * ctx,
 
 int
 ddrop_resolver_gethostbyname(struct ddrop_resolver_ctx * ctx,
-                          const char             * name,
-                          int                      type,
-                          ddrop_resolver_cb           cb,
-                          void                   * args) {
+                             const char                * name,
+                             int                         type,
+                             ddrop_resolver_cb           cb,
+                             void                      * args)
+{
     ldns_pkt   * packet;
     ldns_rr_type rr_type;
 
