@@ -7,6 +7,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include <getopt.h>
+#include <pthread.h>
 
 #include <event2/event.h>
 #include <event2/thread.h>
@@ -45,6 +46,42 @@ struct http_resolvr_cfg {
     int      _use_http;
     int      _conn_closed;
 };
+
+
+struct query_stats {
+    uint64_t total_queries;
+    uint64_t total_answers;
+    uint64_t total_errors;
+    uint64_t total_nxdomain;
+    time_t   first_query;
+    time_t   last_query;
+};
+
+struct resolver {
+    struct event_base         * evbase;
+    struct evhtp              * htp;
+    struct http_resolvr_cfg   * config;
+    struct ddrop_resolver_ctx * rctx;
+    struct query_stats        * stats;
+    pthread_mutex_t             m;
+};
+
+struct query {
+    struct resolver * resolvr;
+    evhtp_request_t * http_req;
+};
+
+static struct query_stats *
+query_stats_new(void)
+{
+    struct query_stats * s = calloc(1, sizeof(struct query_stats));
+
+    if (s == NULL) {
+        return NULL;
+    }
+
+    return s;
+}
 
 static const char * help =
     "  -ssl-cert <file>\n"
@@ -245,11 +282,19 @@ parse_arguments_(int argc, char ** argv)
 static int
 resolver_callback_(struct ddrop_resolver_request * req, void * args)
 {
+    struct query    * query;
+    struct resolver * resolvr;
     evhtp_request_t * request;
     ldns_pkt        * answer_pkt;
     evhtp_res         res;
 
-    request = (evhtp_request_t *)args;
+    query   = (struct query *)args;
+    ddrop_assert(query != NULL);
+
+    resolvr = query->resolvr;
+    ddrop_assert(resolvr != NULL);
+
+    request = (evhtp_request_t *)query->http_req;
     ddrop_assert(request != NULL);
 
     if (!(answer_pkt = ddrop_resolver_request_get_a_packet(req))) {
@@ -322,11 +367,6 @@ resolver_callback_(struct ddrop_resolver_request * req, void * args)
         } while (0);
 
 
-        /*
-        evhtp_headers_add_header(request->headers_out,
-                evhtp_header_new("Connection", "close", 0, 0));
-                */
-
         evhtp_headers_add_header(request->headers_out,
                 evhtp_header_new("Content-Type", "application/dnsdrop-json", 0, 0));
         evbuffer_add(request->buffer_out, outbuf, outlen);
@@ -336,7 +376,27 @@ resolver_callback_(struct ddrop_resolver_request * req, void * args)
         res = EVHTP_RES_OK;
     }
 
+    pthread_mutex_lock(&resolvr->m);
+    {
+        resolvr->stats->total_answers += 1;
+
+        if (answer_pkt) {
+            if (ldns_pkt_get_rcode(answer_pkt) != LDNS_RCODE_NOERROR) {
+                resolvr->stats->total_errors += 1;
+            }
+
+            if (ldns_pkt_get_rcode(answer_pkt) == LDNS_RCODE_NXDOMAIN) {
+                resolvr->stats->total_nxdomain += 1;
+            }
+        } else {
+            resolvr->stats->total_errors += 1;
+        }
+    }
+    pthread_mutex_unlock(&resolvr->m);
+
+
     ddrop_safe_free(req, ddrop_resolver_request_free);
+    ddrop_safe_free(query, free);
 
     evhtp_request_resume(request);
     evhtp_send_reply(request, res);
@@ -345,16 +405,51 @@ resolver_callback_(struct ddrop_resolver_request * req, void * args)
 } /* resolver_callback_ */
 
 static void
+http_stats_handler_(evhtp_request_t * request, void * arg)
+{
+    struct resolver * resolvr;
+
+    resolvr = (struct resolver *)arg;
+    ddrop_assert(resolvr != NULL);
+
+    pthread_mutex_lock(&resolvr->m);
+    {
+        evbuffer_add_printf(request->buffer_out,
+                "{\"queries\":%zu,"
+                "\"answers\":%zu,"
+                "\"errors\":%zu,"
+                "\"nxdomain\":%zu,"
+                "\"first_query\":%lu,"
+                "\"last_query\":%lu}",
+                resolvr->stats->total_queries,
+                resolvr->stats->total_answers,
+                resolvr->stats->total_errors,
+                resolvr->stats->total_nxdomain,
+                resolvr->stats->first_query,
+                resolvr->stats->last_query);
+    }
+    pthread_mutex_unlock(&resolvr->m);
+
+    evhtp_send_reply(request, EVHTP_RES_OK);
+}
+
+static void
 http_request_handler_(evhtp_request_t * request, void * arg)
 {
+    struct resolver           * resolvr;
     struct ddrop_resolver_ctx * resolver_ctx;
     size_t                      buffer_len;
     unsigned char             * buffer;
     size_t                      n_read;
     ldns_pkt                  * query_pkt;
     lz_json                   * query_json;
+    struct timeval              tv;
+    struct query              * query;
 
-    resolver_ctx = (struct ddrop_resolver_ctx *)arg;
+    resolvr      = (struct resolver *)arg;
+    ddrop_assert(resolvr != NULL);
+
+    resolver_ctx = resolvr->rctx;
     ddrop_assert(resolver_ctx != NULL);
 
     buffer_len   = evbuffer_get_length(request->buffer_in);
@@ -374,66 +469,96 @@ http_request_handler_(evhtp_request_t * request, void * arg)
         return evhtp_send_reply(request, EVHTP_RES_SERVERR);
     }
 
+    query           = malloc(sizeof(*query));
+    ddrop_assert(query != NULL);
+
+    query->resolvr  = resolvr;
+    query->http_req = request;
+
     if (ddrop_resolver_send_pkt(resolver_ctx,
-            query_pkt, resolver_callback_, request) == -1) {
+            query_pkt, resolver_callback_, query) == -1) {
         ddrop_safe_free(query_json, lz_json_free);
         ddrop_safe_free(query_pkt, ldns_pkt_free);
+        ddrop_safe_free(query, free);
 
         return evhtp_send_reply(request, EVHTP_RES_SERVERR);
     }
 
     ddrop_safe_free(query_json, lz_json_free);
+
+    event_base_gettimeofday_cached(resolvr->evbase, &tv);
+
+    pthread_mutex_lock(&resolvr->m);
+    {
+        if (resolvr->stats->first_query == 0) {
+            resolvr->stats->first_query = (time_t)tv.tv_sec;
+        }
+
+        resolvr->stats->last_query     = (time_t)tv.tv_sec;
+        resolvr->stats->total_queries += 1;
+    }
+    pthread_mutex_unlock(&resolvr->m);
+
     return evhtp_request_pause(request);
 } /* http_request_handler_ */
 
 int
 main(int argc, char ** argv)
 {
-    struct http_resolvr_cfg   * config;
-    struct event_base         * evbase;
-    struct ddrop_resolver_ctx * resolver;
-    evhtp_ssl_cfg_t           * ssl_config;
-    evhtp_t                   * htp;
-    int                         res;
+    struct resolver * resolvr;
+    evhtp_ssl_cfg_t * ssl_config;
+    int               res;
 
-    config     = parse_arguments_(argc, argv);
-    ddrop_assert(config != NULL);
+    resolvr        = calloc(1, sizeof(*resolvr));
+    ddrop_assert(resolvr != NULL);
 
-    ssl_config = resolver_cfg2ssl_cfg_(config);
+    resolvr->stats = query_stats_new();
+    ddrop_assert(resolvr->stats != NULL);
+
+    pthread_mutex_init(&resolvr->m, NULL);
+
+    resolvr->config = parse_arguments_(argc, argv);
+    ddrop_assert(resolvr->config != NULL);
+
+    ssl_config      = resolver_cfg2ssl_cfg_(resolvr->config);
     ddrop_assert(ssl_config != NULL);
 
-    res        = evthread_use_pthreads();
+    res = evthread_use_pthreads();
     ddrop_assert(res != -1);
 
-    evbase     = event_base_new();
-    ddrop_assert(evbase != NULL);
+    resolvr->evbase = event_base_new();
+    ddrop_assert(resolvr->evbase != NULL);
 
-    res        = evthread_make_base_notifiable(evbase);
+    res           = evthread_make_base_notifiable(resolvr->evbase);
     ddrop_assert(res != -1);
 
-    resolver   = ddrop_resolver_ctx_new(evbase, config->_resolv_conf);
-    ddrop_assert(resolver != NULL);
+    resolvr->rctx = ddrop_resolver_ctx_new(resolvr->evbase,
+            resolvr->config->_resolv_conf);
+    ddrop_assert(resolvr->rctx != NULL);
 
-    htp        = evhtp_new(evbase, NULL);
-    ddrop_assert(htp != NULL);
+    resolvr->htp        = evhtp_new(resolvr->evbase, NULL);
+    ddrop_assert(resolvr->htp != NULL);
 
-    res        = ddrop_resolver_ctx_start(resolver);
+    resolvr->htp->flags = EVHTP_FLAG_ENABLE_ALL;
+
+    res = ddrop_resolver_ctx_start(resolvr->rctx);
     ddrop_assert(res != -1);
 
-    htp->flags = EVHTP_FLAG_ENABLE_ALL;
-
-    if (config->_use_http == 0) {
-        res = evhtp_ssl_init(htp, ssl_config);
+    if (resolvr->config->_use_http == 0) {
+        res = evhtp_ssl_init(resolvr->htp, ssl_config);
         ddrop_assert(res != -1);
     }
 
-    evhtp_set_cb(htp, "/_dns/",
-        http_request_handler_, resolver);
+    evhtp_set_cb(resolvr->htp, "/_stats/",
+            http_stats_handler_, resolvr);
 
-    res = evhtp_bind_socket(htp,
-        config->_listen_addr,
-        config->_listen_port, SOMAXCONN);
+    evhtp_set_cb(resolvr->htp, "/_dns/",
+             http_request_handler_, resolvr);
+
+    res = evhtp_bind_socket(resolvr->htp,
+            resolvr->config->_listen_addr,
+            resolvr->config->_listen_port, SOMAXCONN);
     ddrop_assert(res != -1);
 
-    return event_base_loop(evbase, 0);
+    return event_base_loop(resolvr->evbase, 0);
 } /* main */
