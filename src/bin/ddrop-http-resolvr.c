@@ -52,9 +52,9 @@ struct query_stats {
     uint64_t total_queries;
     uint64_t total_answers;
     uint64_t total_errors;
-    uint64_t total_nxdomain;
     time_t   first_query;
     time_t   last_query;
+    uint64_t response[LDNS_RCODE_NOTZONE + 1];
 };
 
 struct resolver {
@@ -381,12 +381,16 @@ resolver_callback_(struct ddrop_resolver_request * req, void * args)
         resolvr->stats->total_answers += 1;
 
         if (answer_pkt) {
-            if (ldns_pkt_get_rcode(answer_pkt) != LDNS_RCODE_NOERROR) {
+            ldns_pkt_rcode rcode;
+
+            rcode = ldns_pkt_get_rcode(answer_pkt);
+
+            if (rcode != LDNS_RCODE_NOERROR) {
                 resolvr->stats->total_errors += 1;
             }
 
-            if (ldns_pkt_get_rcode(answer_pkt) == LDNS_RCODE_NXDOMAIN) {
-                resolvr->stats->total_nxdomain += 1;
+            if (rcode <= LDNS_RCODE_NOTZONE) {
+                resolvr->stats->response[rcode] += 1;
             }
         } else {
             resolvr->stats->total_errors += 1;
@@ -417,21 +421,39 @@ http_stats_handler_(evhtp_request_t * request, void * arg)
         evbuffer_add_printf(request->buffer_out,
                 "{\"queries\":%zu,"
                 "\"answers\":%zu,"
-                "\"errors\":%zu,"
+                "\"errors\":{\"total\":%zu,"
+                "\"formmerr\":%zu,"
+                "\"servfail\":%zu,"
                 "\"nxdomain\":%zu,"
+                "\"notimpl\":%zu,"
+                "\"refused\":%zu,"
+                "\"yxdomain\":%zu,"
+                "\"yxrrset\":%zu,"
+                "\"nxrrset\":%zu,"
+                "\"notauth\":%zu,"
+                "\"notzone\":%zu},"
                 "\"first_query\":%lu,"
                 "\"last_query\":%lu}",
                 resolvr->stats->total_queries,
                 resolvr->stats->total_answers,
                 resolvr->stats->total_errors,
-                resolvr->stats->total_nxdomain,
+                resolvr->stats->response[LDNS_RCODE_FORMERR],
+                resolvr->stats->response[LDNS_RCODE_SERVFAIL],
+                resolvr->stats->response[LDNS_RCODE_NXDOMAIN],
+                resolvr->stats->response[LDNS_RCODE_NOTIMPL],
+                resolvr->stats->response[LDNS_RCODE_REFUSED],
+                resolvr->stats->response[LDNS_RCODE_YXDOMAIN],
+                resolvr->stats->response[LDNS_RCODE_YXRRSET],
+                resolvr->stats->response[LDNS_RCODE_NXRRSET],
+                resolvr->stats->response[LDNS_RCODE_NOTAUTH],
+                resolvr->stats->response[LDNS_RCODE_NOTZONE],
                 resolvr->stats->first_query,
                 resolvr->stats->last_query);
     }
     pthread_mutex_unlock(&resolvr->m);
 
     evhtp_send_reply(request, EVHTP_RES_OK);
-}
+} /* http_stats_handler_ */
 
 static void
 http_request_handler_(evhtp_request_t * request, void * arg)
