@@ -18,6 +18,7 @@
 
 #include "ddrop/common.h"
 #include "ddrop/core/log.h"
+#include "ddrop/dns/rbl.h"
 #include "ddrop/dns/json.h"
 #include "ddrop/dns/resolver.h"
 
@@ -32,6 +33,7 @@ enum {
     OPTARG_BIND_PORT,
     OPTARG_USE_HTTP,
     OPTARG_CONN_CLOSE,
+    OPTARG_DISABLE_RBL,
 };
 
 struct http_resolvr_cfg {
@@ -45,6 +47,7 @@ struct http_resolvr_cfg {
     char   * _resolv_conf;
     int      _use_http;
     int      _conn_closed;
+    int      _disable_rbl;
 };
 
 
@@ -63,6 +66,7 @@ struct resolver {
     struct http_resolvr_cfg   * config;
     struct ddrop_resolver_ctx * rctx;
     struct query_stats        * stats;
+    struct ddrop_dns_rbl      * rbl;
     pthread_mutex_t             m;
 };
 
@@ -194,6 +198,7 @@ parse_arguments_(int argc, char ** argv)
     const char              * errstr         = NULL;
     int                       use_http       = 0;
     int                       conn_closed    = 0;
+    int                       disable_rbl    = 0;
 
     static struct option      long_options[] = {
         { "ssl-cert",                required_argument, 0, OPTARG_CERT         },
@@ -206,6 +211,7 @@ parse_arguments_(int argc, char ** argv)
         { "resolv-conf",             required_argument, 0, OPTARG_RESOLV_CONF  },
         { "use-http",                no_argument,       0, OPTARG_USE_HTTP     },
         { "conn-close",              no_argument,       0, OPTARG_CONN_CLOSE   },
+        { "disable-rbl",             no_argument,       0, OPTARG_DISABLE_RBL  },
         { "help",                    no_argument,       0, 'h'                 },
         { NULL,                      0,                 0, 0                   },
     };
@@ -242,6 +248,9 @@ parse_arguments_(int argc, char ** argv)
             case OPTARG_USE_HTTP:
                 use_http      = 1;
                 break;
+            case OPTARG_DISABLE_RBL:
+                disable_rbl   = 1;
+                break;
             case 'h':
             default:
                 fprintf(stdout, "Usage: %s [opts]\n%s", argv[0], help);
@@ -260,6 +269,7 @@ parse_arguments_(int argc, char ** argv)
         ._resolv_conf   = resolv_conf,
         ._use_http      = use_http,
         ._conn_closed   = conn_closed,
+        ._disable_rbl   = disable_rbl,
     });
 
     if (validate_config_(config, &errstr) == -1) {
@@ -409,6 +419,82 @@ resolver_callback_(struct ddrop_resolver_request * req, void * args)
 } /* resolver_callback_ */
 
 static void
+http_rbl_add_handler_(evhtp_request_t * request, void * arg)
+{
+    struct resolver * resolvr;
+
+    resolvr = (struct resolver *)arg;
+    ddrop_assert(resolvr != NULL);
+
+    pthread_mutex_lock(&resolvr->m);
+    do {
+        evhtp_uri_t   * uri = request->uri;
+        evhtp_query_t * query;
+
+        if (uri == NULL) {
+            break;
+        }
+
+        query = uri->query;
+
+        if (query == NULL) {
+            break;
+        }
+
+        char * val = evhtp_kv_find(query, "n");
+
+        if (val == NULL) {
+            break;
+        }
+
+        ddrop_dns_rbl_insert(resolvr->rbl, val, LDNS_RR_CLASS_IN);
+    } while (0);
+    pthread_mutex_unlock(&resolvr->m);
+
+    evhtp_send_reply(request, EVHTP_RES_OK);
+}
+
+static void
+http_rbl_del_handler_(evhtp_request_t * request, void * arg)
+{
+    struct resolver * resolvr;
+
+    resolvr = (struct resolver *)arg;
+    ddrop_assert(resolvr != NULL);
+
+
+    evhtp_send_reply(request, EVHTP_RES_OK);
+}
+
+static int
+rbl_listfn_(struct ddrop_dns_rbl_ent * ent, void * arg)
+{
+    evhtp_request_t * r = (evhtp_request_t *)arg;
+
+    ddrop_assert(r != NULL);
+
+    evbuffer_add_printf(r->buffer_out, "%s\n",
+            ddrop_dns_rbl_ent_str(ent));
+
+    return 0;
+}
+
+static void
+http_rbl_list_handler_(evhtp_request_t * request, void * arg)
+{
+    struct resolver * resolvr;
+
+    resolvr = (struct resolver *)arg;
+    ddrop_assert(resolvr != NULL);
+
+    pthread_mutex_lock(&resolvr->m);
+    ddrop_dns_rbl_foreach(resolvr->rbl, rbl_listfn_, request);
+    pthread_mutex_unlock(&resolvr->m);
+
+    evhtp_send_reply(request, EVHTP_RES_OK);
+}
+
+static void
 http_stats_handler_(evhtp_request_t * request, void * arg)
 {
     struct resolver * resolvr;
@@ -491,6 +577,23 @@ http_request_handler_(evhtp_request_t * request, void * arg)
         return evhtp_send_reply(request, EVHTP_RES_SERVERR);
     }
 
+    if (resolvr->config->_disable_rbl == 0) {
+        ldns_rr * q_rr;
+
+        if ((q_rr = ldns_rr_list_rr(ldns_pkt_question(query_pkt), 0))) {
+            ldns_rdf * q_rdf;
+
+            if ((q_rdf = ldns_rr_owner(q_rr))) {
+                if (ddrop_dns_rbl_find_rdf(resolvr->rbl,
+                            q_rdf, ldns_rr_get_class(q_rr))) {
+                    ddrop_safe_free(query_json, lz_json_free);
+
+                    return evhtp_send_reply(request, EVHTP_RES_SERVERR);
+                }
+            }
+        }
+    }
+
     query           = malloc(sizeof(*query));
     ddrop_assert(query != NULL);
 
@@ -531,30 +634,37 @@ main(int argc, char ** argv)
     evhtp_ssl_cfg_t * ssl_config;
     int               res;
 
-    resolvr        = calloc(1, sizeof(*resolvr));
+    resolvr = calloc(1, sizeof(*resolvr));
     ddrop_assert(resolvr != NULL);
-
-    resolvr->stats = query_stats_new();
-    ddrop_assert(resolvr->stats != NULL);
 
     pthread_mutex_init(&resolvr->m, NULL);
 
     resolvr->config = parse_arguments_(argc, argv);
     ddrop_assert(resolvr->config != NULL);
 
+    resolvr->stats  = query_stats_new();
+    ddrop_assert(resolvr->stats != NULL);
+
+    if (resolvr->config->_disable_rbl == 0) {
+        resolvr->rbl = ddrop_dns_rbl_new();
+        ddrop_assert(resolvr->rbl != NULL);
+
+        ddrop_dns_rbl_insert(resolvr->rbl, "poop.ackers.net.", LDNS_RR_CLASS_IN);
+    }
+
     ssl_config      = resolver_cfg2ssl_cfg_(resolvr->config);
     ddrop_assert(ssl_config != NULL);
 
-    res = evthread_use_pthreads();
+    res             = evthread_use_pthreads();
     ddrop_assert(res != -1);
 
     resolvr->evbase = event_base_new();
     ddrop_assert(resolvr->evbase != NULL);
 
-    res           = evthread_make_base_notifiable(resolvr->evbase);
+    res             = evthread_make_base_notifiable(resolvr->evbase);
     ddrop_assert(res != -1);
 
-    resolvr->rctx = ddrop_resolver_ctx_new(resolvr->evbase,
+    resolvr->rctx   = ddrop_resolver_ctx_new(resolvr->evbase,
             resolvr->config->_resolv_conf);
     ddrop_assert(resolvr->rctx != NULL);
 
@@ -576,6 +686,17 @@ main(int argc, char ** argv)
 
     evhtp_set_cb(resolvr->htp, "/_dns/",
              http_request_handler_, resolvr);
+
+    if (resolvr->config->_disable_rbl == 0) {
+        evhtp_set_cb(resolvr->htp, "/_rbl/add",
+             http_rbl_add_handler_, resolvr);
+
+        evhtp_set_cb(resolvr->htp, "/_rbl/del",
+             http_rbl_del_handler_, resolvr);
+
+        evhtp_set_cb(resolvr->htp, "/_rbl/list",
+            http_rbl_list_handler_, resolvr);
+    }
 
     res = evhtp_bind_socket(resolvr->htp,
             resolvr->config->_listen_addr,

@@ -16,6 +16,15 @@ struct ddrop_dns_rbl_ent {
     struct ddrop_dns_rbl_ent * next;
 };
 
+#define RBL_MKFN(type, name)                                          \
+    type ddrop_dns_rbl_ent_ ## name(struct ddrop_dns_rbl_ent * ent) { \
+        return (type)ent->name;                                       \
+    }
+
+RBL_MKFN(ldns_rdf *, name);
+RBL_MKFN(char *, str);
+RBL_MKFN(uint16_t, class);
+
 struct ddrop_dns_rbl {
     ldns_rbtree_t * tree;
 };
@@ -104,4 +113,27 @@ ddrop_dns_rbl_insert(struct ddrop_dns_rbl * rbl, const char * name, uint16_t cla
     ldns_rbtree_insert(rbl->tree, &ent->node);
 
     return ent;
+}
+
+int
+ddrop_dns_rbl_foreach(struct ddrop_dns_rbl * rbl, int (*cb)(struct ddrop_dns_rbl_ent *, void *), void * arg)
+{
+    ldns_rbnode_t * node;
+
+    node = ldns_rbtree_first(rbl->tree);
+
+    while (node != LDNS_RBTREE_NULL) {
+        struct ddrop_dns_rbl_ent * ent;
+        int                        ret;
+
+        ent = (struct ddrop_dns_rbl_ent *)node->key;
+
+        if ((cb) && (ret = (cb)(ent, arg)) != 0) {
+            return ret;
+        }
+
+        node = ldns_rbtree_next(node);
+    }
+
+    return 0;
 }

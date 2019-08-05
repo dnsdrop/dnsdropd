@@ -1,8 +1,9 @@
 add_executable        (ddrop-http-resolvr ddrop-http-resolvr.c)
 add_dependencies      (ddrop-http-resolvr AppDependencies)
 target_link_libraries (ddrop-http-resolvr
-ddrop_dnsJSON
-ddrop_dnsResolver
+    ddrop_dnsJSON
+    ddrop_dnsResolver
+    ddrop_dnsRBL
     lz_json
     lz_core
     ldns
